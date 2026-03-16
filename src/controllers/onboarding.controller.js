@@ -1,110 +1,138 @@
-const bcrypt = require('bcryptjs');
 const User = require('../models/User.model');
 const SMEProfile = require('../models/SMEProfile.model');
-const Document = require('../models/Document.model');
-const { sendOTP } = require('../services/otp.service');
 
+// 🔑 Generate KS1-style SME ID (e.g., KS1-T5WQ)
+const generateSmeId = () => {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let result = 'KS1-';
+  for (let i = 0; i < 4; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+};
+
+// Step 1: Create user account
 const createAccount = async (req, res) => {
   try {
-    const { fullName, phone, email, password } = req.body;
-    const hashedPassword = await bcrypt.hash(password, 10);
-    const user = new User({ phone, email, passwordHash: hashedPassword });
+    const { fullName, phone, wallet, password } = req.body;
+
+    if (!fullName || !phone || !password) {
+      return res.status(400).json({ message: 'Full name, phone, and password are required' });
+    }
+
+    const existingUser = await User.findOne({ phone });
+    if (existingUser) {
+      return res.status(409).json({ message: 'Phone number already registered' });
+    }
+
+    const user = new User({ fullName, phone, wallet, password });
     await user.save();
-    res.status(201).json({ success: true, userId: user._id });
+
+    res.json({ success: true, userId: user._id.toString() });
   } catch (err) {
-    if (err.code === 11000) return res.status(400).json({ message: 'Phone already registered' });
-    res.status(500).json({ message: err.message });
+    console.error('Create Account Error:', err.message);
+    res.status(500).json({ message: 'Internal server error' });
   }
 };
 
-const verifyPhone = async (req, res) => {
-  try {
-    const { phone, otp } = req.body;
-    await User.updateOne({ phone }, { isPhoneVerified: true });
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-};
-
+// Step 2: Create SME profile + generate KS1 ID
 const createSMEProfile = async (req, res) => {
   try {
-    const { userId, businessName, businessType, industry, city, address, ownerName, idType, idNumber } = req.body;
-    const profile = new SMEProfile({
+    const { userId, businessName, businessType, industry, country, city, address } = req.body;
+
+    if (!userId || !businessName || !businessType) {
+      return res.status(400).json({ message: 'Missing required fields' });
+    }
+
+    // 🔥 Generate real KS1 SME ID
+    const smeId = generateSmeId(); // e.g., "KS1-T5WQ"
+
+    const smeProfile = new SMEProfile({
       userId,
+      smeId,
       businessName,
       businessType,
       industry,
+      country,
       city,
-      address,
-      country: 'Ghana'
+      address
     });
-    await profile.save();
-    res.status(201).json({ success: true, smeId: profile._id });
+
+    await smeProfile.save();
+
+    res.json({ success: true, smeId });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error('Create SME Profile Error:', err.message);
+    res.status(500).json({ message: 'Internal server error' });
   }
 };
 
+// Step 3: Upload document
 const uploadDocument = async (req, res) => {
   try {
     const { smeId, documentType } = req.body;
-    const fileUrl = `/uploads/${req.file.filename}`;
-    const doc = new Document({ smeId, documentType, fileUrl });
-    await doc.save();
-    res.json({ success: true, documentId: doc._id });
+    const file = req.file;
+
+    if (!smeId || !file) {
+      return res.status(400).json({ message: 'smeId and document are required' });
+    }
+
+    // In real app: save to cloud storage and return URL
+    const documentUrl = 'https://example.com/uploaded-id.jpg';
+
+    res.json({ success: true, documentUrl });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error('Upload Document Error:', err.message);
+    res.status(500).json({ message: 'Internal server error' });
   }
 };
 
-const getSMEProfile = async (req, res) => {
-  try {
-    const profile = await SMEProfile.findById(req.params.id)
-      .populate('userId', 'phone email')
-      .lean();
-    if (!profile) return res.status(404).json({ message: 'Profile not found' });
-    res.json(profile);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-};
-
-// STEP 4 – Final Submission
+// Step 4: Finalize onboarding and trigger KYC
 const submitOnboarding = async (req, res) => {
   try {
     const { smeId } = req.body;
-    const profile = await SMEProfile.findById(smeId);
-    if (!profile) return res.status(404).json({ message: 'Profile not found' });
 
-    // Update status to pending verification
-    profile.status = 'PENDING_KYC_VERIFICATION';
-    await profile.save();
+    if (!smeId) {
+      return res.status(400).json({ message: 'smeId is required' });
+    }
 
-    // 🔥 TEMPORARY: Replace Kafka with console log for MVP
+    const sme = await SMEProfile.findOne({ smeId });
+    if (!sme) {
+      return res.status(404).json({ message: 'SME not found' });
+    }
+
     console.log('✅ ONBOARDING SUBMITTED – Forwarding to KS1 Verification System');
-    console.log('SME ID:', profile._id);
-    console.log('Business:', profile.businessName);
-    console.log('Status:', profile.status);
+    console.log('SME ID:', smeId);
+    console.log('Business:', sme.businessName);
+    console.log('Status: PENDING_KYC_VERIFICATION');
 
-    res.json({ 
-      success: true, 
-      message: 'Onboarding submitted successfully. Awaiting KYC verification.',
-      smeId: profile._id,
-      status: profile.status
+    // Call KYC system
+    const kycRes = await fetch('https://ks1-verification-kyc-system-2.onrender.com/api/kyc/start-verification', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        smeId: sme.smeId, // 👈 Now it's KS1-XXXX, not ObjectId
+        businessName: sme.businessName,
+        ownerName: sme.ownerName || 'N/A',
+        idType: 'Ghana Card',
+        idNumber: 'GHA123456789',
+        documentUrls: ['https://example.com/id.jpg'],
+        city: sme.city
+      })
     });
+
+    const kycResult = await kycRes.json();
+
+    res.json({ success: true, kycStatus: kycResult.status });
   } catch (err) {
-    console.error('❌ Onboarding submission failed:', err.message);
-    res.status(500).json({ message: 'Failed to submit onboarding. Please try again.' });
+    console.error('Submit Onboarding Error:', err.message);
+    res.status(500).json({ message: 'Internal server error' });
   }
 };
 
-// ✅ CRITICAL: Export ALL functions — including uploadDocument
 module.exports = {
   createAccount,
-  verifyPhone,
   createSMEProfile,
   uploadDocument,
-  getSMEProfile,
   submitOnboarding
 };

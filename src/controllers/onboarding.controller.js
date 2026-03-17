@@ -1,7 +1,6 @@
 const User = require('../models/User.model');
 const SMEProfile = require('../models/SMEProfile.model');
 
-// 🔑 Generate KS1-style ID: KS1-ABCD
 const generateSmeId = () => {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   let result = 'KS1-';
@@ -48,7 +47,6 @@ const createSMEProfile = async (req, res) => {
 
 const uploadDocument = async (req, res) => {
   try {
-    // Simulate upload
     res.json({ success: true, documentUrl: 'https://example.com/id.jpg' });
   } catch (err) {
     console.error('Upload Error:', err.message);
@@ -68,7 +66,6 @@ const submitOnboarding = async (req, res) => {
     console.log('Business:', sme.businessName);
     console.log('Status: PENDING_KYC_VERIFICATION');
 
-    // Call KYC
     await fetch('https://ks1-verification-kyc-system-2.onrender.com/api/kyc/start-verification', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -90,10 +87,21 @@ const submitOnboarding = async (req, res) => {
   }
 };
 
-// ✅ EXPORT ALL FUNCTIONS CORRECTLY
+// ✅ STATS ENDPOINT
+const getStats = async (req, res) => {
+  try {
+    const total = await SMEProfile.countDocuments();
+    res.json({ total });
+  } catch (err) {
+    console.error('Stats error:', err.message);
+    res.status(500).json({ total: 0 });
+  }
+};
+
 module.exports = {
   createAccount,
   createSMEProfile,
   uploadDocument,
-  submitOnboarding
+  submitOnboarding,
+  getStats
 };

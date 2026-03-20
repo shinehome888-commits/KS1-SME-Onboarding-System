@@ -201,9 +201,9 @@ async function handleSubmit() {
   }
 }
 
-// ✅ SAFE Dev Mode Banner — No more "null.onclick" errors
+// ✅ SAFE Dev Mode Banner — NO MORE "null.onclick" ERRORS
 function addDevModeBanner() {
-  // Only show in local development
+  // Only run in local development
   if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
     return;
   }
